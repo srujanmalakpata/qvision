@@ -1,0 +1,14 @@
+.venv
+.git
+.github
+__pycache__
+.pytest_cache
+.ruff_cache
+data
+runs/*
+!runs/fmnist-cnn/
+runs/fmnist-cnn/*
+!runs/fmnist-cnn/model.pt
+tests
+results
+*.onnx

@@ -1,0 +1,156 @@
+{
+  "variants": {
+    "fp32": {
+      "accuracy": 0.9301,
+      "accuracy_delta_pp": 0.0,
+      "paired_vs_fp32": {
+        "only_fp32_correct": 0,
+        "only_variant_correct": 0,
+        "delta_pp_ci95": [
+          0.0,
+          0.0
+        ],
+        "mcnemar_exact_p": 1.0
+      },
+      "top1_agreement_with_fp32": 1.0,
+      "size_bytes": 884239,
+      "compression_vs_fp32": 1.0,
+      "latency": {
+        "batch_1": {
+          "median_ms": 0.531,
+          "p90_ms": 0.583,
+          "mean_ms": 0.598,
+          "repeats": 50
+        },
+        "batch_256": {
+          "median_ms": 63.99,
+          "p90_ms": 82.889,
+          "mean_ms": 68.624,
+          "repeats": 50
+        }
+      }
+    },
+    "int8_weight_only": {
+      "accuracy": 0.9303,
+      "accuracy_delta_pp": 0.02,
+      "paired_vs_fp32": {
+        "only_fp32_correct": 3,
+        "only_variant_correct": 5,
+        "delta_pp_ci95": [
+          -0.03,
+          0.08
+        ],
+        "mcnemar_exact_p": 0.7265625
+      },
+      "top1_agreement_with_fp32": 0.9991,
+      "size_bytes": 232253,
+      "compression_vs_fp32": 3.81,
+      "latency": {
+        "batch_1": {
+          "median_ms": 0.768,
+          "p90_ms": 0.877,
+          "mean_ms": 0.87,
+          "repeats": 50
+        },
+        "batch_256": {
+          "median_ms": 60.721,
+          "p90_ms": 74.827,
+          "mean_ms": 66.469,
+          "repeats": 50
+        }
+      }
+    },
+    "int4_weight_only": {
+      "accuracy": 0.9272,
+      "accuracy_delta_pp": -0.29,
+      "paired_vs_fp32": {
+        "only_fp32_correct": 109,
+        "only_variant_correct": 80,
+        "delta_pp_ci95": [
+          -0.56,
+          -0.01
+        ],
+        "mcnemar_exact_p": 0.04139561928397321
+      },
+      "top1_agreement_with_fp32": 0.9795,
+      "size_bytes": 123069,
+      "compression_vs_fp32": 7.18,
+      "latency": {
+        "batch_1": {
+          "median_ms": 2.259,
+          "p90_ms": 4.143,
+          "mean_ms": 2.816,
+          "repeats": 50
+        },
+        "batch_256": {
+          "median_ms": 61.71,
+          "p90_ms": 88.532,
+          "mean_ms": 68.951,
+          "repeats": 50
+        }
+      }
+    },
+    "int8_torch_dynamic": {
+      "accuracy": 0.9303,
+      "accuracy_delta_pp": 0.02,
+      "paired_vs_fp32": {
+        "only_fp32_correct": 5,
+        "only_variant_correct": 7,
+        "delta_pp_ci95": [
+          -0.05,
+          0.09
+        ],
+        "mcnemar_exact_p": 0.7744140625
+      },
+      "top1_agreement_with_fp32": 0.9986,
+      "size_bytes": 279939,
+      "compression_vs_fp32": 3.16,
+      "latency": {
+        "batch_1": {
+          "median_ms": 0.61,
+          "p90_ms": 0.897,
+          "mean_ms": 0.754,
+          "repeats": 50
+        },
+        "batch_256": {
+          "median_ms": 59.699,
+          "p90_ms": 77.479,
+          "mean_ms": 65.814,
+          "repeats": 50
+        }
+      }
+    }
+  },
+  "weight_error": {
+    "int8": {
+      "max_abs_error": 0.0027988962829113007,
+      "mean_relative_l2_error": 0.006767119203383724
+    },
+    "int4": {
+      "max_abs_error": 0.051447007805109024,
+      "mean_relative_l2_error": 0.12191709006826083
+    }
+  },
+  "settings": {
+    "n_test": 10000,
+    "paired_bootstrap_resamples": 2000,
+    "batch_sizes": [
+      1,
+      256
+    ],
+    "latency_repeats": 50,
+    "latency_method": "round-robin interleaved across variants, after 5 warmup calls",
+    "torch_threads": 2,
+    "torch": "2.14.1+cpu",
+    "environment": {
+      "python": "3.11.15",
+      "platform": "Linux-6.18.44-fc-v64-x86_64-with-glibc2.39",
+      "processor": "x86_64",
+      "torch": "2.14.1+cpu",
+      "numpy": "2.4.6",
+      "torch_threads": 2,
+      "cpu_count": 4,
+      "load_average_1m": 5.99
+    }
+  }
+}

@@ -1,0 +1,18 @@
+# Fast end-to-end smoke run used by CI: 2k training images, 2 epochs.
+seed: 0
+run_name: smoke
+runs_dir: runs
+threads: 2
+data:
+  root: data/fashion-mnist
+  val_size: 1000
+  train_subset: 2048
+model:
+  channels: [8, 16]
+  hidden: 32
+  dropout: 0.1
+train:
+  epochs: 2
+  batch_size: 128
+  lr: 0.003
+  patience: 2

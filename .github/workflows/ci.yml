@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      # Ruff alone, at the version pinned in uv.lock: no need to install torch to lint.
+      - run: uvx ruff@0.16.10 check .
+      - run: uvx ruff@0.16.10 format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: pytest (CPU, offline)
+        run: uv run pytest -q
+
+  train-smoke:
+    # Real Fashion-MNIST download + 2-epoch training on 2,048 images, then the full
+    # evaluate -> quantize -> ONNX pipeline on the resulting checkpoint.
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - uses: actions/cache@v4
+        with:
+          path: data
+          key: fashion-mnist-v1
+      - run: uv sync --frozen
+      - run: uv run qvision download
+      - run: uv run qvision train --config configs/smoke.yaml
+      - run: uv run qvision evaluate --run runs/smoke --out-dir smoke-results
+      - run: uv run qvision quantize --run runs/smoke --out-dir smoke-results --repeats 5
+      - run: uv run qvision export-onnx --run runs/smoke --out-dir smoke-results --repeats 5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results
+          path: |
+            smoke-results/
+            runs/smoke/metrics.csv
+            runs/smoke/summary.json
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - uses: actions/cache@v4
+        with:
+          path: data
+          key: fashion-mnist-v1
+      - run: uv sync --frozen
+      # The image bakes in a checkpoint; CI uses a smoke checkpoint, not the full model.
+      - run: uv run qvision train --config configs/smoke.yaml --run-name fmnist-cnn
+      - run: docker build -t qvision:ci .
+      - name: Smoke-test the container
+        run: |
+          docker run -d --name qv -p 127.0.0.1:8000:8000 qvision:ci
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/health && break; sleep 1; done
+          curl -sf http://127.0.0.1:8000/health || { docker logs qv; exit 1; }
+          uv run qvision sample-png --index 0 --out sample.png
+          curl -sf -F "file=@sample.png;type=image/png" http://127.0.0.1:8000/predict
+          docker rm -f qv

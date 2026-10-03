@@ -1,0 +1,29 @@
+# Python / tooling
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Datasets, run directories and model artefacts (regenerate with `make all`)
+data/
+runs/
+smoke-results/
+*.pt
+*.pth
+*.onnx
+*.onnx.data
+*.ckpt
+sample.png
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

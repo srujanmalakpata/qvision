@@ -1,0 +1,22 @@
+seed: 42
+run_name: fmnist-cnn
+runs_dir: runs
+threads: 2
+data:
+  root: data/fashion-mnist
+  val_size: 5000
+  train_subset: null
+model:
+  channels:
+  - 16
+  - 32
+  hidden: 128
+  dropout: 0.25
+  num_classes: 10
+train:
+  epochs: 10
+  batch_size: 128
+  lr: 0.002
+  weight_decay: 0.0001
+  patience: 3
+  min_delta: 0.0001
