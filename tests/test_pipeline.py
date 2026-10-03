@@ -48,6 +48,8 @@ def test_cli_pipeline_end_to_end(tmp_path, offline_dataset, monkeypatch, capsys)
 
     main(["quantize", "--run", str(run_dir), "--out-dir", str(out_dir), "--repeats", "2"])
     study = json.loads((out_dir / "quantization.json").read_text())
+    assert study["settings"]["quantized_engine"] == torch.backends.quantized.engine
+    assert study["settings"]["quantized_engine"] in {"x86", "fbgemm", "qnnpack"}
     assert set(study["variants"]) == {
         "fp32",
         "int8_weight_only",

@@ -115,9 +115,12 @@ Decisions:
   *would* be needed for full integer inference.
 
 The comparison baseline is **`torch.ao.quantization.quantize_dynamic`**. It quantizes Linear
-weights to INT8 and quantizes activations per batch at runtime, using FBGEMM integer kernels.
-It does not touch convolutions. `torch.ao.quantization` is deprecated in favour of the
-separate `torchao` package (PyTorch 2.14 prints a deprecation warning), so `pyproject.toml`
+weights to INT8 and quantizes activations per batch at runtime, using CPU integer kernels.
+`study.select_quantized_engine` selects a supported backend in order: `x86`, `fbgemm`, then
+`qnnpack` (the Apple Silicon fallback). Selection happens before weight packing and sets
+PyTorch's process-wide quantization engine; the study records `settings.quantized_engine`.
+It fails clearly when none of these engines is available. It does not touch convolutions.
+`torch.ao.quantization` is deprecated in favour of the separate `torchao` package (PyTorch 2.14 prints a deprecation warning), so `pyproject.toml`
 pins `torch<2.15` and the code imports it lazily. Moving the baseline to `torchao` is listed
 under next steps.
 
