@@ -3,7 +3,72 @@
 This record contains measured results and test status for the environment below. It does not
 establish production readiness. The service is validated, never deployed.
 
-## Environment
+## 2026-10-03 — macOS arm64 regression validation
+
+Environment: macOS 27.0.1 arm64, Python 3.11.15, uv 0.11.21, PyTorch 2.14.1,
+NumPy 2.4.6 and Ruff 0.16.10. A fresh process reports default quantization engine `none`
+and supported engines `[qnnpack]`. The implementation now selects `qnnpack` before dynamic
+INT8 weight packing. Tests also cover preference for `x86`/`fbgemm` and clear failure when no
+supported engine is available.
+
+The default uv cache/tool directories are outside writable paths. Commands used a writable
+cache under `/private/tmp`; locked packages and the real Fashion-MNIST files were recovered
+from a previous local cache. Fresh network access remains blocked. Training used fresh run
+directories with the documented configs, changing only data/output paths. Two torch threads
+were used. Timings were measured under concurrent load and are not performance guarantees.
+The committed `results/` files retain the earlier Linux measurements; this run did not replace
+them or infer an engine for historical JSON that lacks `settings.quantized_engine`.
+
+`<check-root>` below is `/private/tmp/qvision-verification-2026-10-03`; command logs and new
+JSON outputs are stored there locally.
+
+| Check / command | Result | Evidence |
+|---|---|---|
+| Fresh `uv run pytest -q` dependency fetch | BLOCKED | PyPI DNS lookup failed; default uv cache access was also sandbox-blocked |
+| `uv sync --frozen --offline --python <cached-python-3.11>` | PASS | Fresh project-local `.venv`, 50 locked packages installed from cache |
+| `uv lock --check --offline` | PASS | Resolved 56 packages; lockfile unchanged |
+| `uvx ruff@0.16.10 check . && uvx ruff@0.16.10 format --check .` | BLOCKED | Standalone tool resolution needs unavailable PyPI access; format was attempted separately and also blocked |
+| `uv run ruff check .` / `uv run ruff format --check .` | PASS | Same locked Ruff 0.16.10; all checks passed, 32 files already formatted |
+| `uv run pytest -q` with writable cached environment | PASS | **133 passed in 13.04 s**, including the fresh-process dynamic INT8 test and end-to-end CLI JSON engine assertion |
+| `uv run qvision download --root <check-root>/fresh-data` | BLOCKED | Official dataset hostname DNS lookup failed |
+| `uv run qvision download --root <check-root>/data/fashion-mnist` | PASS | All four copied real dataset files checksum-verified; train shape `(60000, 28, 28)` |
+| `uv run qvision train --config <check-root>/smoke.yaml` | PASS | Unchanged smoke settings: 2 epochs, 2,048 training images, test accuracy 0.7427 |
+| `uv run qvision evaluate --run <check-root>/runs/smoke --out-dir <check-root>/smoke-results` | PASS | Full 10,000-image test-set report |
+| `uv run qvision quantize --run <check-root>/runs/smoke --out-dir <check-root>/smoke-results --repeats 5` | PASS | Matches CI; all four variants, recorded engine `qnnpack` |
+| `uv run qvision export-onnx --run <check-root>/runs/smoke --out-dir <check-root>/smoke-results --repeats 5` | PASS | Matches CI; allclose and 100% top-1 agreement on 10,000 images |
+| `uv run qvision sample-png --root <check-root>/data/fashion-mnist --out <check-root>/sample.png` | PASS | Generated a real test-set PNG |
+| Smoke-checkpoint API via `TestClient(app_factory())`, fp32 / INT8 / INT4 | PASS | `/health` and `/predict` returned 200 for all three; each response had ten probabilities summing to one |
+| `uv run qvision train --config <check-root>/default.yaml` | PASS | Full 10 epochs, 218,586 parameters, best epoch 10; test accuracy 0.9306, CI [0.9256, 0.9354], ECE 0.0151614; training 280.7 s under concurrent load |
+| `uv run qvision evaluate --run <check-root>/runs/fmnist-cnn --out-dir <check-root>/full-results` | PASS | n=10,000; accuracy 0.9306, CI [0.9256, 0.9354] |
+| `uv run qvision quantize --run <check-root>/runs/fmnist-cnn --out-dir <check-root>/full-results --repeats 50` | PASS | All four variants; engine `qnnpack`; dynamic INT8 accuracy 0.9308, serialized size 279,811 bytes |
+| Same quantization command, `--repeats 60 --out-dir <check-root>/repeat-1`, then `repeat-2` | PASS | Both complete; engine `qnnpack`, identical accuracies and serialized sizes across all three studies |
+| `uv run qvision export-onnx --run <check-root>/runs/fmnist-cnn --out-dir <check-root>/full-results --repeats 50` | PASS | n=10,000; max logit difference 1.5258789e-5, 100% top-1 agreement, allclose true |
+| `docker info` / `docker buildx build --check .` | BLOCKED | Permission denied accessing the Colima Docker socket |
+| Docker CI image build and container smoke test | BLOCKED | Requires the same inaccessible Docker daemon; no image/container created |
+| Hosted GitHub Actions | NOT_RUN | No hosted workflow queried or triggered; local checks cannot establish hosted status |
+| Markdown local-link validation / workflow YAML parsing | PASS | All local doc links resolve; workflow jobs are lint, test, train-smoke and docker |
+| `make -n all sample serve`, tracked-artifact audit and ignore checks | PASS | Quickstart targets expand correctly; no tracked model/build/cache files; build, data, run and HTTP session outputs ignored |
+| `git diff --check` | PASS | No whitespace errors |
+
+The four earlier macOS failures (pytest, full pipeline, 50-repeat study and two 60-repeat
+studies) shared the `NoQEngine` cause. All four checks now pass locally on macOS arm64.
+Runtime selection is centralized in
+`study.select_quantized_engine`; each new study writes the actual backend to
+`settings.quantized_engine`. A subprocess regression test exercises the build's real default
+without depending on engine changes made by earlier tests. No existing assertion was weakened
+and no test was skipped.
+
+Remaining limits: fresh network installation/downloads and Docker are BLOCKED; hosted CI and
+multi-seed training are NOT_RUN. API checks used the in-process ASGI client, not a newly
+deployed service. The earlier macOS Docker run built the unchanged Dockerfile and passed
+container checks; that historical success is not a current Docker PASS.
+
+## Earlier Linux measurements (2026-10-03)
+
+The following sections preserve the earlier Linux results and their measurement conditions.
+They do not establish current hosted CI status.
+
+### Environment
 
 - **Measurement date**: 2026-10-03. Full-pipeline results use fresh data, run directories and caches.
 - **Machine**: shared 4-vCPU Linux container (Intel Xeon Processor @ 2.80 GHz, 15 GB RAM, x86_64,
@@ -42,7 +107,7 @@ establish production readiness. The service is validated, never deployed.
 | 20 | `docker buildx build --check .` | PASS | `Check complete, no warnings found.` |
 | 21 | `docker build --network host <build-context>` (two-stage image, modified context) | PASS | built in 85 s, image 1.54 GB; build of the unmodified repository context is NOT_RUN |
 | 22 | `docker run -p 127.0.0.1:8043:8000` + curl + `docker inspect` | PASS | `/health` ok, test image 0 → `Ankle boot` (0.99999785), runs as UID 10001, `onnx`/`onnxruntime`/`pytest`/`sklearn` absent, HEALTHCHECK status `healthy` after 30 s. |
-| 23 | GitHub Actions workflow on GitHub | NOT_RUN | The repository has not been pushed, so CI has never run on GitHub |
+| 23 | GitHub Actions workflow on GitHub | NOT_RUN | Hosted workflow status was not verified during this run |
 
 ## Quantization results (`results/quantization.md`, run 1)
 
@@ -116,13 +181,14 @@ establish production readiness. The service is validated, never deployed.
 
 ## Limits and tests not run
 
-- **GitHub Actions**: NOT_RUN. The repository has not been pushed.
+- **GitHub Actions**: NOT_RUN. Hosted workflow status has not been verified here.
 - **Multi-seed training**: NOT_RUN. The reported numbers come from one seed.
-- **macOS dynamic INT8 comparison**: FAIL when the default torch quantization engine is `none`,
-  with `quantized::linear_prepack NoQEngine` in the end-to-end CLI test. The same suite is PASS
-  with `torch.backends.quantized.engine = "qnnpack"` selected only in the test process.
-- **Build of the unmodified repository context**: NOT_RUN. Docker results above cover a
-  two-stage image built from a modified context and its local container checks.
+- **macOS dynamic INT8 comparison**: the earlier `NoQEngine` failure is fixed by runtime
+  backend selection in `study.select_quantized_engine`. The 2026-10-03 macOS checks above
+  validate the fix in a fresh process and record the selected engine in study JSON.
+- **Docker**: the Linux results above used a modified build context. The earlier macOS run
+  built the unchanged Dockerfile and passed health, prediction, UID and dependency-exclusion
+  checks. Docker access in the current sandbox is BLOCKED by socket permissions.
 - Early stopping does not trigger in the full run: validation loss is still improving at epoch
   10. Unit tests exercise stopping and best-weight restoration.
 - The service is validated, never deployed. Production deployment is out of scope.

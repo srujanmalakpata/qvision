@@ -32,10 +32,21 @@ from qvision.metrics import paired_comparison
 from qvision.quantize import quantize_model_weights, serialized_size_bytes, weight_error_stats
 
 
+def select_quantized_engine() -> str:
+    """Select the process-wide CPU backend before packing dynamic INT8 weights."""
+    supported = torch.backends.quantized.supported_engines
+    for engine in ("x86", "fbgemm", "qnnpack"):
+        if engine in supported:
+            torch.backends.quantized.engine = engine
+            return engine
+    raise RuntimeError(f"No supported dynamic INT8 quantization engine; available: {supported}")
+
+
 def torch_dynamic_int8(model: nn.Module) -> nn.Module:
     """PyTorch's built-in dynamic quantization (Linear layers only)."""
     from torch.ao.quantization import quantize_dynamic
 
+    select_quantized_engine()
     with warnings.catch_warnings():
         # Silence only the two known deprecation notices: torch.ao.quantization is moving to the
         # separate `torchao` package, and torch.ao's quantized-tensor helpers warn that they are
@@ -130,6 +141,7 @@ def run_study(
             "latency_method": "round-robin interleaved across variants, after 5 warmup calls",
             "torch_threads": torch.get_num_threads(),
             "torch": torch.__version__,
+            "quantized_engine": torch.backends.quantized.engine,
         },
     }
 

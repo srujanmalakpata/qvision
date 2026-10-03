@@ -22,6 +22,8 @@ smoke-results/
 *.onnx.data
 *.ckpt
 sample.png
+# HTTP client session cache created by local API checks
+:memory:.ses
 
 # Editors / OS
 .DS_Store

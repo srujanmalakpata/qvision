@@ -2,7 +2,36 @@
 
 A reproducible CPU-based PyTorch project for small Fashion-MNIST CNN training, evaluation with confidence intervals and calibration, weight quantization, ONNX export, and FastAPI serving.
 
-Repository: [srujanmalakpata/qvision](https://github.com/srujanmalakpata/qvision).
+[![CI](https://github.com/srujanmalakpata/qvision/actions/workflows/ci.yml/badge.svg)](https://github.com/srujanmalakpata/qvision/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11–3.12](https://img.shields.io/badge/Python-3.11%E2%80%933.12-blue.svg)](pyproject.toml)
+
+## Highlights
+
+- **93.01% test accuracy**, with a **92.50–93.49% bootstrap 95% CI** on 10,000 images
+  ([evaluation](results/evaluation.md)); the [model card](MODEL_CARD.md) documents scope and error modes.
+- **Calibration measured explicitly:** ECE **0.0167** across 15 confidence bins, with a full
+  reliability table rather than accuracy alone ([evaluation](results/evaluation.md)).
+- **Packed INT4 weights are 7.18× smaller** (120.2 KiB vs 863.5 KiB); paired bootstrap and
+  exact McNemar tests expose the **−0.29 percentage-point** accuracy cost
+  ([quantization study](results/quantization.md)). Weight-only quantization saves storage.
+- **ONNX Runtime preserves 100% top-1 agreement** on the test set, with maximum logit difference
+  **9.54e-6**; batch-256 median latency was **15.925 ms vs 56.393 ms** for PyTorch on the
+  recorded shared Linux CPU, using two threads ([raw report](results/onnx.json)).
+- **Offline tests enforce reproducible training and responsive serving:**
+  `test_training_is_deterministic` checks identical weights;
+  `test_health_answers_while_a_prediction_is_running` checks `/health` during blocked inference
+  ([training tests](tests/test_train.py), [API tests](tests/test_api.py)).
+
+**Tech stack:** Python 3.11/3.12 · PyTorch (CPU) · NumPy · ONNX Runtime · FastAPI · uv · Docker.
+
+**Validation:** Local CPU checks and historical measurements are documented in
+[VERIFICATION.md](VERIFICATION.md). Hosted GitHub Actions has not been verified here; the
+service is validated locally and has never been deployed.
+
+[Quickstart](#quickstart) · [Architecture](#architecture) · [Serving and Docker](#serving-and-docker) ·
+[Testing](#testing) ·
+[Features](#features) · [Results](#results) · [Limitations](#limitations) · [License](#license)
 
 The custom symmetric per-channel INT8/INT4 weight quantizer is compared with PyTorch's built-in
 dynamic quantization for accuracy, size and CPU latency. ONNX Runtime parity is checked on the
@@ -10,62 +39,26 @@ full test set. A FastAPI `/predict` endpoint serves the model locally or in Dock
 inference run on CPU, and tests require no network. The results below include load-dependent
 latency measurements; see the limitations.
 
-## Features
+## Quickstart
 
-- **Data pipeline without torchvision**: downloads Fashion-MNIST from the official URLs, checks
-  the published MD5s, parses the IDX format with NumPy, and makes a seeded train/val split.
-- **Deterministic training**: seeded RNGs, `torch.use_deterministic_algorithms(True)`, AdamW
-  with cosine decay, early stopping that restores the best weights (unit-tested; it did not
-  trigger in the reported run), a hard failure on NaN/inf losses, and a YAML config.
-- **File-based run tracking**: each run directory gets `config.yaml`, `env.json`,
-  `metrics.csv` and `summary.json`.
-- **Evaluation**: accuracy with a bootstrap 95% CI, macro-F1, per-class precision/recall/F1,
-  a confusion matrix, and ECE (15 bins) with its reliability table, all implemented in NumPy.
-  The tests check the confusion matrix and P/R/F1 against scikit-learn, McNemar against SciPy,
-  and ECE and the bootstrap against hand-computed cases.
-- **Custom quantizer** (`src/qvision/quantize.py`): symmetric per-output-channel INT8 and INT4
-  (two values packed per byte), with drop-in `QuantConv2d`/`QuantLinear` modules.
-- **Quantization study**: fp32, own INT8, own INT4 and `torch.ao` dynamic INT8, compared on
-  accuracy delta (with a *paired* test against fp32: exact McNemar p-value and a
-  paired-bootstrap CI of the delta), top-1 agreement, serialized size, and interleaved CPU
-  latency at batch 1 and batch 256.
-- **ONNX export** with the `torch.export`-based exporter and a dynamic batch dimension. ONNX
-  Runtime parity is checked on all 10,000 test images.
-- **FastAPI service**: `POST /predict` takes a 28×28 PNG and returns the label, the confidence
-  and all 10 probabilities. `GET /health` is also available. It can serve the INT8/INT4 variant
-  through an env var. Request size is checked from `Content-Length` before the body is read,
-  PNG dimensions and mode are checked from the header before decoding, and inference runs in
-  the threadpool so it never blocks the event loop (torch is capped at `QV_TORCH_THREADS`,
-  default 1, so concurrent requests do not oversubscribe the CPU).
-- **Docker image** (two-stage build, CPU torch, non-root user, healthcheck, no ONNX/dev
-  packages) and a **GitHub Actions CI workflow** (ruff, pytest, a real training smoke run, and a
-  Docker build with a container smoke test). The image was built and smoke-tested locally; the
-  workflow has not run on GitHub yet.
-
-## Quick start
-
-Requires Python 3.11 and [uv](https://docs.astral.sh/uv/). `uv sync` creates a project-local
-`.venv` with the CPU-only PyTorch wheel from `download.pytorch.org/whl/cpu`.
+Requires Python 3.11 or 3.12, [uv](https://docs.astral.sh/uv/), Git and Make. Dependency
+installation and the first dataset download need network access. `uv sync --frozen` creates a
+project-local `.venv` from the lockfile with CPU PyTorch from `download.pytorch.org/whl/cpu`.
 
 ```bash
-make setup         # uv sync
-make all           # download, train, evaluate, quantize, export ONNX (7-35 min on 2 threads)
-make serve         # http://127.0.0.1:8000/docs
+git clone https://github.com/srujanmalakpata/qvision.git
+cd qvision
+uv sync --frozen
+make all           # download → train → evaluate → quantize → ONNX; allow 7–35 min on 2 threads
 make sample        # writes sample.png from the test set
-curl -F "file=@sample.png;type=image/png" http://127.0.0.1:8000/predict
+make serve         # leave running; open http://127.0.0.1:8000/docs
 ```
 
-Individual steps: `uv run qvision {download,train,evaluate,quantize,export-onnx,sample-png,serve}
---help`. Weights and data are **not committed**. `make train` regenerates
-`runs/fmnist-cnn/model.pt`, and `make smoke` runs a short training job on 2,048 images.
-
-Docker (after `make train`, because the image bakes in the checkpoint):
-
-```bash
-make docker-build && make docker-run   # published on 127.0.0.1:8000 only
-```
-
-Serve the custom weight-quantized model: `QV_QUANT_BITS=8 make serve` (or `4`).
+At `/docs`, expand `POST /predict`, select **Try it out**, upload `sample.png`, and execute.
+The response contains a class label, confidence and all class probabilities. Reports are in
+`results/` and the checkpoint is in `runs/fmnist-cnn/`. To try a shorter run, replace `make all`
+with `make smoke` and start it with `make RUN=runs/smoke serve`; this uses a smaller model and
+does not reproduce the full-model results below.
 
 ## Architecture
 
@@ -101,6 +94,25 @@ src/qvision/
   cli.py         `qvision` command
 ```
 
+## Serving and Docker
+
+Individual steps: `uv run qvision --help`, then e.g. `uv run qvision quantize --help`.
+Weights and data are **not committed**. `make train` regenerates
+`runs/fmnist-cnn/model.pt`, and `make smoke` runs a short training job on 2,048 images.
+
+Docker (after `make train`, because the image bakes in the checkpoint):
+
+```bash
+make docker-build && make docker-run   # published on 127.0.0.1:8000 only
+```
+
+Serve the custom weight-quantized model: `QV_QUANT_BITS=8 make serve` (or `4`). From another
+terminal, send the generated sample with:
+
+```bash
+curl -F "file=@sample.png;type=image/png" http://127.0.0.1:8000/predict
+```
+
 ## Testing
 
 ```bash
@@ -108,8 +120,8 @@ make test   # uv run pytest -q
 make lint   # ruff check + ruff format --check
 ```
 
-There are 126 test cases (73 test functions, some parametrized). They ran in 13 s on the CPU
-container with no network access (an autouse fixture makes `urlopen` raise). They cover:
+The suite runs on CPU without network access (an autouse fixture makes `urlopen` raise).
+The latest commands, test counts and results are in [VERIFICATION.md](VERIFICATION.md). Tests cover:
 
 - IDX parsing, normalisation, the config validation, and the MD5-verified download against a
   fake in-memory mirror (idempotent re-runs, re-fetching a corrupt file, no `.part` file left
@@ -126,7 +138,41 @@ container with no network access (an autouse fixture makes `urlopen` raise). The
   training `normalize` path (grayscale, RGB and palette), plus the 411/413/422 limits, a
   PNG that declares 9000×9000 pixels (rejected without decoding), 16-bit PNGs, and `/health`
   answering while a prediction is in flight
-- an end-to-end CLI pipeline on fake IDX files
+- dynamic INT8 backend preference and unsupported-build errors, plus quantized inference in
+  a fresh process using the build's default engine
+- an end-to-end CLI pipeline on fake IDX files, including the recorded quantization engine
+
+## Features
+
+- **Data pipeline without torchvision**: downloads Fashion-MNIST from the official URLs, checks
+  the published MD5s, parses the IDX format with NumPy, and makes a seeded train/val split.
+- **Deterministic training**: seeded RNGs, `torch.use_deterministic_algorithms(True)`, AdamW
+  with cosine decay, early stopping that restores the best weights (unit-tested; it did not
+  trigger in the reported run), a hard failure on NaN/inf losses, and a YAML config.
+- **File-based run tracking**: each run directory gets `config.yaml`, `env.json`,
+  `metrics.csv` and `summary.json`.
+- **Evaluation**: accuracy with a bootstrap 95% CI, macro-F1, per-class precision/recall/F1,
+  a confusion matrix, and ECE (15 bins) with its reliability table, all implemented in NumPy.
+  The tests check the confusion matrix and P/R/F1 against scikit-learn, McNemar against SciPy,
+  and ECE and the bootstrap against hand-computed cases.
+- **Custom quantizer** (`src/qvision/quantize.py`): symmetric per-output-channel INT8 and INT4
+  (two values packed per byte), with drop-in `QuantConv2d`/`QuantLinear` modules.
+- **Quantization study**: fp32, own INT8, own INT4 and `torch.ao` dynamic INT8, compared on
+  accuracy delta (with a *paired* test against fp32: exact McNemar p-value and a
+  paired-bootstrap CI of the delta), top-1 agreement, serialized size, and interleaved CPU
+  latency at batch 1 and batch 256.
+- **ONNX export** with the `torch.export`-based exporter and a dynamic batch dimension. ONNX
+  Runtime parity is checked on all 10,000 test images.
+- **FastAPI service**: `POST /predict` takes a 28×28 PNG and returns the label, the confidence
+  and all 10 probabilities. `GET /health` is also available. It can serve the INT8/INT4 variant
+  through an env var. Request size is checked from `Content-Length` before the body is read,
+  PNG dimensions and mode are checked from the header before decoding, and inference runs in
+  the threadpool so it never blocks the event loop (torch is capped at `QV_TORCH_THREADS`,
+  default 1, so concurrent requests do not oversubscribe the CPU).
+- **Docker image** (two-stage build, CPU torch, non-root user, healthcheck, no ONNX/dev
+  packages) and a **GitHub Actions CI workflow** (ruff, pytest, a real training smoke run, and a
+  Docker build with a container smoke test). The image was built and smoke-tested locally; the
+  hosted workflow status has not been verified here.
 
 ## Results
 
@@ -141,8 +187,8 @@ machine before quoting them. Raw outputs are in [`results/`](results/).
 
 **Training** (`configs/default.yaml`): 218,586 parameters, 55,000 train / 5,000 val images, 10
 epochs. Early stopping (patience 3) did not trigger, and the best val loss came at epoch 10
-(val acc 0.9366). Training took 366.5 s (`make all` end to end: 7 min 16 s). The run is
-bit-reproducible in repeated runs: per-epoch losses, best val loss (0.17701382174491884) and
+(val acc 0.9366). Training took 366.5 s (`make all` end to end: 7 min 16 s).
+Within the recorded environment the run is bit-reproducible in repeated runs: per-epoch losses, best val loss (0.17701382174491884) and
 test accuracy match exactly, and two smoke runs produced identical
 per-epoch losses (seeded RNGs, deterministic kernels).
 
@@ -207,8 +253,9 @@ graph optimiser fuses Conv and BatchNorm, among other things), not from the own 
 
 **Docker**: a two-stage image built in 85 s (1.54 GB, CPU torch). The container became
 `healthy`, ran as UID 10001, contained no ONNX/pytest/scikit-learn packages, and classified test
-image 0 as `Ankle boot`. The build used a modified context; a build of the unmodified repository
-context is NOT_RUN. See [VERIFICATION.md](VERIFICATION.md).
+image 0 as `Ankle boot`. That Linux build used a modified context. A later macOS run built
+the unchanged Dockerfile and passed the container checks; the current sandbox blocks Docker access.
+See [VERIFICATION.md](VERIFICATION.md).
 
 ## Limitations
 
@@ -219,8 +266,9 @@ context is NOT_RUN. See [VERIFICATION.md](VERIFICATION.md).
 - The own quantizer is **weight-only fake quantization**. It reduces storage, not compute time.
   There is no static/activation quantization and no integer convolution.
 - `torch.ao.quantization` is deprecated (moving to `torchao`), so `torch` is pinned `<2.15`.
-- On macOS, a default torch quantization engine of `none` causes the dynamic INT8 comparison
-  and end-to-end CLI test to fail with `quantized::linear_prepack NoQEngine`.
+- Dynamic INT8 requires a supported PyTorch CPU backend. The study selects `x86`, then
+  `fbgemm`, then `qnnpack` (including Apple Silicon), and records it as
+  `settings.quantized_engine` in the results JSON. Builds with none of these fail explicitly.
 - The API expects Fashion-MNIST-style input: a 28×28 grayscale PNG with a light object on a dark
   background. Real-world photos are out of distribution and will be misclassified with high
   confidence.
@@ -228,7 +276,8 @@ context is NOT_RUN. See [VERIFICATION.md](VERIFICATION.md).
   loaded and less-loaded measurements. Rerun `make quantize onnx` on your own machine before
   quoting them.
 - Docker container checks pass locally, but a build of the unmodified repository context is
-  NOT_RUN. The GitHub Actions workflow is NOT_RUN because the repository has not been pushed.
+  NOT_RUN in the historical Linux record; the later macOS run built the unchanged Dockerfile
+  successfully. Current Docker checks are sandbox-blocked; hosted GitHub Actions is NOT_RUN.
 - There is no authentication, rate limiting or batching in the service. It is validated,
   never deployed.
 
